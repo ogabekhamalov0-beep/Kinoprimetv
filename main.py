@@ -1,32 +1,38 @@
+import os
 import logging
 from aiogram import Bot, Dispatcher, types, executor
+from aiohttp import web
 
-# 1. Loglarni sozlash (Render loglarida xatolarni ko'rish uchun)
+# Loglar
 logging.basicConfig(level=logging.INFO)
 
-# 2. Yangi tokenni o'rnatish
+# Token
 API_TOKEN = '8720785352:AAFkW_Y8lExxDcIvJqJvBm16dGglVLfv-UM'
 
-# 3. Bot va Dispatcher obyektlarini yaratish
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
-# 4. /start komandasi uchun handler
+# Render uchun oddiy server (Port xatosini yo'qotish uchun)
+async def handle(request):
+    return web.Response(text="Bot is running!")
+
+app = web.Application()
+app.router.add_get("/", handle)
+
+# Start komandasi
 @dp.message_handler(commands=['start'])
 async def send_welcome(message: types.Message):
-    """
-    Foydalanuvchi /start yuborganda javob qaytaradi
-    """
-    await message.reply("Salom! Kinoprimetv botingiz muvaffaqiyatli ishga tushdi. \nKino kodini yuboring!")
+    await message.reply("Salom! Botingiz nihoyat Render'da muvaffaqiyatli ishga tushdi! 🚀")
 
-# 5. Oddiy xabarlar (Kino kodlari) uchun handler
-@dp.message_handler()
-async def echo(message: types.Message):
-    # Bu yerda kelajakda bazadan kino qidirish mantiqini qo'shishingiz mumkin
-    await message.answer(f"Siz yuborgan kod: {message.text}. Tezpada kino topiladi!")
+# Botni ishga tushirish funksiyasi
+async def on_startup(dp):
+    # Bu qism Render portini band qiladi
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', os.getenv('PORT', 10000))
+    await site.start()
+    logging.info("Web server started on port")
 
-# 6. Botni ishga tushirish
 if __name__ == '__main__':
-    print("Bot polling rejimida ishga tushmoqda...")
-    executor.start_polling(dp, skip_updates=True)
+    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
     
