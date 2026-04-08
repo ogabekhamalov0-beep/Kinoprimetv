@@ -9,115 +9,101 @@ from aiohttp import web
 API_TOKEN = '8720785352:AAFkW_Y8lExxDcIvJqJvBm16dGglVLfv-UM'
 ADMIN_ID = 6223558485
 
-# Skrinshotdagi barcha kanallarning ID raqamlari
+# Skrinshotdagi kanallarning ID raqamlari (Hammasida bot admin bo'lishi shart!)
 CHANNELS = [
     "-1002479427027", # Kino Hudud
     "-1002361661858", # Kino Prime TV
-    "-1002157147775"  # Boshqa kanal (rasmdan olingan)
+    "-1002241513289", # Kino Olami
+    "-1002157147775"  # Boshqa kanal
 ]
 
-# Tugmalarda ko'rinadigan linklar
+# Tugmalar uchun linklar
 CHANNEL_LINKS = [
     {"name": "Kino Hudud 🎬", "url": "https://t.me/KinoHudud"},
-    {"name": "Kino Prime TV 🎞", "url": "https://t.me/kinoprime_tv"}
+    {"name": "Kino Prime 🎞", "url": "https://t.me/kinoprime_tv"},
+    {"name": "Kino Olami 🎥", "url": "https://t.me/kino_olami_hd"}
 ]
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN, parse_mode=types.ParseMode.HTML)
 dp = Dispatcher(bot)
 
-# --- MA'LUMOTLAR BAZASI ---
-db = sqlite3.connect("movies_v2.db")
+# --- BAZA ---
+db = sqlite3.connect("movies_pro.db")
 cursor = db.cursor()
 cursor.execute("CREATE TABLE IF NOT EXISTS movies (code TEXT PRIMARY KEY, file_id TEXT)")
 db.commit()
 
-# --- RENDER SERVER (Port scan timeout oldini olish uchun) ---
+# --- SERVER ---
 async def handle(request):
-    return web.Response(text="Bot is running perfectly!")
+    return web.Response(text="Bot is running!")
 
 app = web.Application()
 app.router.add_get("/", handle)
 
-# --- MAJBURIY OBUNA TEKSHIRUVI ---
+# --- OBUNA TEKSHIRISH (Xatolikni oldini oluvchi blok bilan) ---
 async def check_sub(user_id):
     for channel in CHANNELS:
         try:
             member = await bot.get_chat_member(chat_id=channel, user_id=user_id)
-            if member.status == 'left':
+            if member.status in ['left', 'kicked']:
                 return False
         except Exception as e:
-            logging.error(f"Xatolik: {channel} da bot admin emas yoki ID xato: {e}")
-            # Agar bot kanalga qo'shilmagan bo'lsa, xato bermasligi uchun true qaytaramiz
-            continue 
+            logging.error(f"Xato: {channel} da bot admin emas: {e}")
+            # Agar bot admin bo'lmasa, bot ishdan to'xtamasligi uchun tekshiruvdan o'tkazib yuboramiz
+            continue
     return True
 
 def get_sub_keyboard():
     keyboard = InlineKeyboardMarkup(row_width=1)
     for ch in CHANNEL_LINKS:
         keyboard.add(InlineKeyboardButton(text=ch['name'], url=ch['url']))
-    keyboard.add(InlineKeyboardButton(text="✅ A'zo bo'ldim / Tekshirish", callback_data="verify_sub"))
+    keyboard.add(InlineKeyboardButton(text="✅ Obunani tekshirish", callback_data="verify"))
     return keyboard
 
 # --- HANDLERLAR ---
-
 @dp.message_handler(commands=['start'])
-async def start_handler(message: types.Message):
+async def start(message: types.Message):
     if await check_sub(message.from_user.id):
-        await message.answer(
-            f"<b>Salom, {message.from_user.first_name}! 👋</b>\n\n"
-            "🎬 <b>KinoPrimeTV</b> botiga xush kelibsiz.\n"
-            "Kino ko'rish uchun uning kodini yuboring!"
-        )
+        await message.answer(f"👋 Salom {message.from_user.first_name}!\n\nKino kodini yuboring:")
     else:
-        await message.answer(
-            "⚠️ <b>Diqqat! Botdan foydalanish uchun quyidagi kanallarga a'zo bo'lishingiz shart:</b>",
-            reply_markup=get_sub_keyboard()
-        )
+        await message.answer("⚠️ <b>Botdan foydalanish uchun quyidagi kanallarga a'zo bo'ling:</b>", 
+                             reply_markup=get_sub_keyboard())
 
-@dp.callback_query_handler(text="verify_sub")
-async def verify_callback(call: types.CallbackQuery):
+@dp.callback_query_handler(text="verify")
+async def verify(call: types.CallbackQuery):
     if await check_sub(call.from_user.id):
         await call.message.delete()
-        await call.message.answer("🎉 <b>Tabriklaymiz!</b> Barcha kanallarga a'zo bo'ldingiz. Endi kino kodini yuborishingiz mumkin.")
+        await call.message.answer("🎉 Rahmat! Kino kodini yuboring.")
     else:
-        await call.answer("❌ Hali hamma kanallarga a'zo bo'lmadingiz! Iltimos, tekshirib ko'ring.", show_alert=True)
+        await call.answer("❌ Hali hamma kanallarga a'zo bo'lmadingiz!", show_alert=True)
 
-# Admin uchun kino qo'shish (Video + "kod:123")
 @dp.message_handler(content_types=['video'], user_id=ADMIN_ID)
-async def add_movie_admin(message: types.Message):
+async def add_movie(message: types.Message):
     if message.caption and "kod:" in message.caption.lower():
         code = message.caption.lower().replace("kod:", "").strip()
         cursor.execute("INSERT OR REPLACE INTO movies (code, file_id) VALUES (?, ?)", (code, message.video.file_id))
         db.commit()
-        await message.reply(f"✅ <b>Bazaga qo'shildi!</b>\n\nKod: <code>{code}</code>")
-    else:
-        await message.reply("📝 Kinoni saqlash uchun videoni yuboring va izohiga <b>kod:123</b> deb yozing.")
+        await message.reply(f"✅ Saqlandi! Kod: <code>{code}</code>")
 
-# Kino qidirish qismi
 @dp.message_handler()
-async def movie_search(message: types.Message):
+async def search(message: types.Message):
     if not await check_sub(message.from_user.id):
-        return await message.answer("⚠️ <b>Avval kanallarga a'zo bo'ling!</b>", reply_markup=get_sub_keyboard())
+        return await message.answer("⚠️ Avval kanallarga a'zo bo'ling!", reply_markup=get_sub_keyboard())
     
     code = message.text.strip()
     cursor.execute("SELECT file_id FROM movies WHERE code = ?", (code,))
     res = cursor.fetchone()
-    
     if res:
-        await message.answer_video(video=res[0], caption=f"🎬 <b>Kino kodi: {code}</b>\n\n✨ @kinoprimetv_bot")
+        await message.answer_video(video=res[0], caption=f"🎬 Kod: {code}\n\n✨ @kinoprimetv_bot")
     elif code.isdigit():
-        await message.answer(f"😔 Kechirasiz, <b>{code}</b> kodli kino topilmadi.")
+        await message.answer("😔 Bu kod bilan kino topilmadi.")
 
-# --- RENDER'DA ISHGA TUSHIRISH ---
 async def on_startup(dp):
-    # Bu qism Render'dagi Port muammosini hal qiladi
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', os.getenv('PORT', 10000))
     await site.start()
-    logging.info("Render port serveri faollashdi.")
 
 if __name__ == '__main__':
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
-    
